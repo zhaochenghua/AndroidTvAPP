@@ -20,16 +20,26 @@ import java.util.regex.Pattern;
 final class GitHubSource {
     static final String README_URL = "https://raw.githubusercontent.com/youhunwl/TVAPP/main/README.md";
     private static final String REPO = "https://github.com/youhunwl/TVAPP";
+    private static final String TREE_API = "https://api.github.com/repos/youhunwl/TVAPP/git/trees/main?recursive=1";
     private static final Pattern LINK = Pattern.compile("\\[下载\\]\\(([^)]+)\\)");
 
     List<TvApp> fetchApps() throws Exception {
         String markdown = get(README_URL);
         ArrayList<TvApp> apps = new ArrayList<>();
         boolean inTable = false;
+        String category = "未分类";
         String[] lines = markdown.split("\\r?\\n");
         for (String line : lines) {
             if (line.startsWith("## 接口源")) {
                 break;
+            }
+            if (line.startsWith("## ") || line.startsWith("### ")) {
+                String heading = line.replaceFirst("^#+\\s*", "").trim();
+                if (heading.length() > 0 && !heading.contains("接口源")) {
+                    category = heading;
+                }
+                inTable = false;
+                continue;
             }
             if (line.startsWith("| APP名称")) {
                 inTable = true;
@@ -47,8 +57,9 @@ final class GitHubSource {
             if (cells.get(0).contains("...updating") || url.length() == 0) {
                 continue;
             }
-            apps.add(new TvApp(cells.get(0), cells.get(1), url, cells.get(3), stripMarkdownLinks(cells.get(4))));
+            apps.add(new TvApp(cells.get(0), cells.get(1), url, cells.get(3), stripMarkdownLinks(cells.get(4)), category));
         }
+        supplementApksFromTree(apps);
         return apps;
     }
 
@@ -77,11 +88,44 @@ final class GitHubSource {
             String name = item.optString("name");
             if ("file".equals(type) && name.toLowerCase().endsWith(".apk")) {
                 String download = item.optString("download_url");
-                out.add(new TvApp(parent.name + " / " + trimApkName(name), parent.version, download, parent.status, parent.note));
+                out.add(new TvApp(parent.name + " / " + trimApkName(name), parent.version, download, parent.status, parent.note, parent.category));
             } else if ("dir".equals(type) && depth < 2) {
                 collectApks(item.optString("path"), parent, out, depth + 1);
             }
         }
+    }
+
+    private static void supplementApksFromTree(List<TvApp> apps) {
+        try {
+            String json = get(TREE_API);
+            JSONObject root = new JSONObject(json);
+            JSONArray tree = root.getJSONArray("tree");
+            for (int i = 0; i < tree.length(); i++) {
+                JSONObject item = tree.getJSONObject(i);
+                String type = item.optString("type");
+                String path = item.optString("path");
+                if (!"blob".equals(type) || !path.toLowerCase().endsWith(".apk")) {
+                    continue;
+                }
+                String url = resolveLink(path);
+                if (containsDownload(apps, url)) {
+                    continue;
+                }
+                String category = categoryFromPath(path);
+                apps.add(new TvApp(nameFromPath(path), "", url, "仓库发现", "从仓库目录自动发现的 APK", category));
+            }
+        } catch (Exception ignored) {
+            // README is still usable if the tree API is temporarily unavailable.
+        }
+    }
+
+    private static boolean containsDownload(List<TvApp> apps, String url) {
+        for (TvApp app : apps) {
+            if (app.downloadUrl.equals(url)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String get(String urlString) throws IOException {
@@ -196,5 +240,23 @@ final class GitHubSource {
 
     private static String trimApkName(String name) {
         return name.replaceAll("(?i)\\.apk$", "");
+    }
+
+    private static String categoryFromPath(String path) {
+        int index = path.indexOf('/');
+        if (index <= 0) {
+            return "未分类";
+        }
+        return path.substring(0, index);
+    }
+
+    private static String nameFromPath(String path) {
+        String[] parts = path.split("/");
+        String fileName = parts.length == 0 ? path : parts[parts.length - 1];
+        String appName = trimApkName(fileName);
+        if (parts.length > 1 && !parts[parts.length - 2].equals(appName)) {
+            return parts[parts.length - 2] + " / " + appName;
+        }
+        return appName;
     }
 }

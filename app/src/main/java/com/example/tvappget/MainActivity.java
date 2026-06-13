@@ -14,6 +14,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -46,6 +47,7 @@ public final class MainActivity extends Activity {
     private final Map<String, DownloadItem> downloads = new LinkedHashMap<>();
 
     private LinearLayout listContainer;
+    private LinearLayout categoryContainer;
     private LinearLayout downloadContainer;
     private TextView titleView;
     private TextView versionView;
@@ -56,6 +58,7 @@ public final class MainActivity extends Activity {
     private Button refreshButton;
     private ProgressBar progressBar;
     private TvApp selected;
+    private String currentCategory = "全部";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,70 +86,80 @@ public final class MainActivity extends Activity {
         TextView header = new TextView(this);
         header.setText("TV应用获取");
         header.setTextColor(TEXT);
-        header.setTextSize(30);
+        header.setTextSize(26);
         header.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(header, new LinearLayout.LayoutParams(-1, dp(46)));
+        root.addView(header, new LinearLayout.LayoutParams(-1, dp(40)));
 
         messageView = new TextView(this);
         messageView.setTextColor(MUTED);
-        messageView.setTextSize(15);
+        messageView.setTextSize(13);
         messageView.setSingleLine(true);
-        root.addView(messageView, new LinearLayout.LayoutParams(-1, dp(30)));
+        root.addView(messageView, new LinearLayout.LayoutParams(-1, dp(24)));
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.HORIZONTAL);
         body.setBaselineAligned(false);
         root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1f));
 
+        LinearLayout listPanel = new LinearLayout(this);
+        listPanel.setOrientation(LinearLayout.VERTICAL);
+        body.addView(listPanel, new LinearLayout.LayoutParams(0, -1, 1.35f));
+
+        HorizontalScrollView categoryScroll = new HorizontalScrollView(this);
+        categoryScroll.setHorizontalScrollBarEnabled(false);
+        categoryContainer = new LinearLayout(this);
+        categoryContainer.setOrientation(LinearLayout.HORIZONTAL);
+        categoryScroll.addView(categoryContainer, new HorizontalScrollView.LayoutParams(-2, -1));
+        listPanel.addView(categoryScroll, new LinearLayout.LayoutParams(-1, dp(44)));
+
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
         scrollView.addView(listContainer, new ScrollView.LayoutParams(-1, -2));
-        body.addView(scrollView, new LinearLayout.LayoutParams(0, -1, 1.35f));
+        listPanel.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         LinearLayout detail = new LinearLayout(this);
         detail.setOrientation(LinearLayout.VERTICAL);
-        detail.setPadding(dp(24), dp(20), dp(24), dp(20));
+        detail.setPadding(dp(16), dp(14), dp(16), dp(14));
         detail.setBackgroundColor(PANEL);
         body.addView(detail, new LinearLayout.LayoutParams(0, -1, 1f));
 
-        titleView = detailText(26, true, TEXT);
+        titleView = detailText(22, true, TEXT);
+        titleView.setSingleLine(true);
         detail.addView(titleView, new LinearLayout.LayoutParams(-1, -2));
-        versionView = detailText(17, false, MUTED);
-        detail.addView(versionView, new LinearLayout.LayoutParams(-1, dp(36)));
-        statusView = detailText(18, true, TEXT);
-        detail.addView(statusView, new LinearLayout.LayoutParams(-1, dp(38)));
-        noteView = detailText(18, false, TEXT);
-        noteView.setLineSpacing(dp(3), 1.0f);
+        versionView = detailText(14, false, MUTED);
+        detail.addView(versionView, new LinearLayout.LayoutParams(-1, dp(26)));
+        statusView = detailText(15, true, TEXT);
+        detail.addView(statusView, new LinearLayout.LayoutParams(-1, dp(28)));
+        noteView = detailText(15, false, TEXT);
+        noteView.setLineSpacing(dp(2), 1.0f);
         detail.addView(noteView, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        TextView downloadTitle = detailText(18, true, TEXT);
-        downloadTitle.setText("下载管理");
-        detail.addView(downloadTitle, new LinearLayout.LayoutParams(-1, dp(34)));
+        primaryButton = actionButton("下载并安装");
+        primaryButton.setOnClickListener(v -> runPrimaryAction());
+        detail.addView(primaryButton, new LinearLayout.LayoutParams(-1, dp(46)));
+
+        refreshButton = actionButton("刷新列表");
+        refreshButton.setOnClickListener(v -> loadApps());
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(44));
+        refreshParams.topMargin = dp(8);
+        detail.addView(refreshButton, refreshParams);
 
         ScrollView downloadScroll = new ScrollView(this);
         downloadScroll.setFillViewport(false);
         downloadContainer = new LinearLayout(this);
         downloadContainer.setOrientation(LinearLayout.VERTICAL);
         downloadScroll.addView(downloadContainer, new ScrollView.LayoutParams(-1, -2));
-        detail.addView(downloadScroll, new LinearLayout.LayoutParams(-1, dp(150)));
+        LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(108));
+        downloadParams.topMargin = dp(8);
+        detail.addView(downloadScroll, downloadParams);
         renderDownloads();
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
         progressBar.setVisibility(View.GONE);
-        detail.addView(progressBar, new LinearLayout.LayoutParams(-1, dp(28)));
-
-        primaryButton = actionButton("下载并安装");
-        primaryButton.setOnClickListener(v -> runPrimaryAction());
-        detail.addView(primaryButton, new LinearLayout.LayoutParams(-1, dp(58)));
-
-        refreshButton = actionButton("刷新列表");
-        refreshButton.setOnClickListener(v -> loadApps());
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(54));
-        refreshParams.topMargin = dp(12);
-        detail.addView(refreshButton, refreshParams);
+        detail.addView(progressBar, new LinearLayout.LayoutParams(-1, dp(18)));
 
         setContentView(root);
     }
@@ -164,7 +177,7 @@ public final class MainActivity extends Activity {
     private Button actionButton(String label) {
         Button button = new Button(this);
         button.setText(label);
-        button.setTextSize(18);
+        button.setTextSize(15);
         button.setTextColor(Color.WHITE);
         button.setAllCaps(false);
         button.setFocusable(true);
@@ -199,16 +212,60 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 showMessage("已加载 " + apps.size() + " 个应用。方向键选择，OK 键下载或查看版本。");
-                renderList(apps);
+                renderCategories();
+                renderCurrentCategory();
             }
         }.execute();
+    }
+
+    private void renderCategories() {
+        categoryContainer.removeAllViews();
+        addCategoryButton("全部");
+        ArrayList<String> categories = new ArrayList<>();
+        for (TvApp app : apps) {
+            String category = empty(app.category, "未分类");
+            if (!categories.contains(category)) {
+                categories.add(category);
+                addCategoryButton(category);
+            }
+        }
+    }
+
+    private void addCategoryButton(String category) {
+        Button button = actionButton(category);
+        button.setTextSize(13);
+        button.setPadding(dp(10), 0, dp(10), 0);
+        button.setOnClickListener(v -> {
+            currentCategory = category;
+            renderCategories();
+            renderCurrentCategory();
+        });
+        button.setBackgroundColor(category.equals(currentCategory) ? FOCUS : BUTTON_BG);
+        button.setOnFocusChangeListener((v, hasFocus) -> v.setBackgroundColor(hasFocus || category.equals(currentCategory) ? FOCUS : BUTTON_BG));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(36));
+        params.rightMargin = dp(8);
+        categoryContainer.addView(button, params);
+    }
+
+    private void renderCurrentCategory() {
+        if ("全部".equals(currentCategory)) {
+            renderList(apps);
+            return;
+        }
+        ArrayList<TvApp> filtered = new ArrayList<>();
+        for (TvApp app : apps) {
+            if (currentCategory.equals(empty(app.category, "未分类"))) {
+                filtered.add(app);
+            }
+        }
+        renderList(filtered);
     }
 
     private void renderList(List<TvApp> data) {
         listContainer.removeAllViews();
         for (TvApp app : data) {
             TextView row = createRow(app);
-            listContainer.addView(row, new LinearLayout.LayoutParams(-1, dp(74)));
+            listContainer.addView(row, new LinearLayout.LayoutParams(-1, dp(60)));
         }
         if (!data.isEmpty()) {
             selected = data.get(0);
@@ -217,6 +274,12 @@ public final class MainActivity extends Activity {
             if (first != null) {
                 first.requestFocus();
             }
+        } else {
+            selected = null;
+            titleView.setText("");
+            versionView.setText("");
+            statusView.setText("");
+            noteView.setText("当前分类暂无应用");
         }
     }
 
@@ -224,9 +287,9 @@ public final class MainActivity extends Activity {
         TextView row = new TextView(this);
         row.setFocusable(true);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(18), 0, dp(14), 0);
+        row.setPadding(dp(14), 0, dp(12), 0);
         row.setTextColor(TEXT);
-        row.setTextSize(19);
+        row.setTextSize(16);
         row.setSingleLine(false);
         row.setText(app.name + "\n" + app.version + "  " + app.status + "  " + (app.apk ? "APK" : "目录"));
         row.setBackgroundColor(Color.TRANSPARENT);
@@ -257,7 +320,7 @@ public final class MainActivity extends Activity {
             return;
         }
         titleView.setText(selected.name);
-        versionView.setText("版本：" + empty(selected.version, "未知"));
+        versionView.setText("分类：" + empty(selected.category, "未分类") + "  版本：" + empty(selected.version, "未知"));
         statusView.setText("状态：" + empty(selected.status, "未知"));
         noteView.setText(empty(selected.note, "暂无简介"));
         primaryButton.setText(selected.apk ? "下载并安装" : "查看可下载版本");
@@ -296,7 +359,10 @@ public final class MainActivity extends Activity {
                     showMessage("没有找到 APK，可在项目页面查看该条目。");
                     return;
                 }
+                currentCategory = "全部";
                 showMessage("找到 " + result.size() + " 个 APK，选择版本后按 OK 下载。按刷新列表返回总表。");
+                categoryContainer.removeAllViews();
+                addCategoryButton("全部");
                 renderList(result);
             }
         }.execute(app);
@@ -349,11 +415,11 @@ public final class MainActivity extends Activity {
             TextView empty = detailText(15, false, MUTED);
             empty.setText("暂无下载任务");
             empty.setGravity(Gravity.CENTER_VERTICAL);
-            downloadContainer.addView(empty, new LinearLayout.LayoutParams(-1, dp(42)));
+            downloadContainer.addView(empty, new LinearLayout.LayoutParams(-1, dp(32)));
             return;
         }
         for (DownloadItem item : downloads.values()) {
-            downloadContainer.addView(createDownloadRow(item), new LinearLayout.LayoutParams(-1, dp(72)));
+            downloadContainer.addView(createDownloadRow(item), new LinearLayout.LayoutParams(-1, dp(52)));
         }
     }
 
@@ -365,23 +431,23 @@ public final class MainActivity extends Activity {
 
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
-        TextView name = detailText(15, true, TEXT);
+        TextView name = detailText(13, true, TEXT);
         name.setSingleLine(true);
         name.setText(item.app.name);
-        TextView state = detailText(13, false, MUTED);
+        TextView state = detailText(12, false, MUTED);
         state.setSingleLine(true);
         state.setText(item.statusText());
         ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);
         bar.setProgress(item.progress);
         bar.setIndeterminate(item.running && item.progress == 0);
-        info.addView(name, new LinearLayout.LayoutParams(-1, dp(22)));
-        info.addView(state, new LinearLayout.LayoutParams(-1, dp(20)));
-        info.addView(bar, new LinearLayout.LayoutParams(-1, dp(18)));
+        info.addView(name, new LinearLayout.LayoutParams(-1, dp(18)));
+        info.addView(state, new LinearLayout.LayoutParams(-1, dp(17)));
+        info.addView(bar, new LinearLayout.LayoutParams(-1, dp(12)));
         row.addView(info, new LinearLayout.LayoutParams(0, -1, 1f));
 
         Button action = actionButton(item.running ? "取消" : item.finished ? "安装" : "移除");
-        action.setTextSize(15);
+        action.setTextSize(13);
         action.setOnClickListener(v -> {
             if (item.running) {
                 cancelDownload(item);
@@ -392,8 +458,8 @@ public final class MainActivity extends Activity {
             }
         });
         action.setOnFocusChangeListener((v, hasFocus) -> v.setBackgroundColor(hasFocus ? (item.running ? DANGER : FOCUS) : BUTTON_BG));
-        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(dp(82), dp(48));
-        actionParams.leftMargin = dp(10);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(dp(68), dp(38));
+        actionParams.leftMargin = dp(8);
         row.addView(action, actionParams);
         return row;
     }
