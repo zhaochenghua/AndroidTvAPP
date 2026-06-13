@@ -28,7 +28,9 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class MainActivity extends Activity {
     private static final int BG = Color.rgb(11, 15, 20);
@@ -36,11 +38,15 @@ public final class MainActivity extends Activity {
     private static final int FOCUS = Color.rgb(0, 184, 148);
     private static final int TEXT = Color.rgb(236, 240, 241);
     private static final int MUTED = Color.rgb(155, 166, 178);
+    private static final int BUTTON_BG = Color.rgb(34, 45, 59);
+    private static final int DANGER = Color.rgb(185, 65, 72);
 
     private final GitHubSource source = new GitHubSource();
     private final ArrayList<TvApp> apps = new ArrayList<>();
+    private final Map<String, DownloadItem> downloads = new LinkedHashMap<>();
 
     private LinearLayout listContainer;
+    private LinearLayout downloadContainer;
     private TextView titleView;
     private TextView versionView;
     private TextView statusView;
@@ -50,7 +56,6 @@ public final class MainActivity extends Activity {
     private Button refreshButton;
     private ProgressBar progressBar;
     private TvApp selected;
-    private DownloadTask currentDownloadTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,8 +66,10 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (currentDownloadTask != null) {
-            currentDownloadTask.cancel(true);
+        for (DownloadItem item : downloads.values()) {
+            if (item.task != null) {
+                item.task.cancel(true);
+            }
         }
         super.onDestroy();
     }
@@ -114,6 +121,18 @@ public final class MainActivity extends Activity {
         noteView.setLineSpacing(dp(3), 1.0f);
         detail.addView(noteView, new LinearLayout.LayoutParams(-1, 0, 1f));
 
+        TextView downloadTitle = detailText(18, true, TEXT);
+        downloadTitle.setText("下载管理");
+        detail.addView(downloadTitle, new LinearLayout.LayoutParams(-1, dp(34)));
+
+        ScrollView downloadScroll = new ScrollView(this);
+        downloadScroll.setFillViewport(false);
+        downloadContainer = new LinearLayout(this);
+        downloadContainer.setOrientation(LinearLayout.VERTICAL);
+        downloadScroll.addView(downloadContainer, new ScrollView.LayoutParams(-1, -2));
+        detail.addView(downloadScroll, new LinearLayout.LayoutParams(-1, dp(150)));
+        renderDownloads();
+
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
         progressBar.setVisibility(View.GONE);
@@ -149,8 +168,8 @@ public final class MainActivity extends Activity {
         button.setTextColor(Color.WHITE);
         button.setAllCaps(false);
         button.setFocusable(true);
-        button.setBackgroundColor(Color.rgb(34, 45, 59));
-        button.setOnFocusChangeListener((v, hasFocus) -> v.setBackgroundColor(hasFocus ? FOCUS : Color.rgb(34, 45, 59)));
+        button.setBackgroundColor(BUTTON_BG);
+        button.setOnFocusChangeListener((v, hasFocus) -> v.setBackgroundColor(hasFocus ? FOCUS : BUTTON_BG));
         return button;
     }
 
@@ -285,8 +304,11 @@ public final class MainActivity extends Activity {
 
     private void downloadApk(TvApp app) {
         try {
-            if (currentDownloadTask != null) {
-                showMessage("已有下载任务正在进行，请稍候。");
+            String key = downloadKey(app);
+            DownloadItem existing = downloads.get(key);
+            if (existing != null && existing.running) {
+                showMessage("已在下载队列中：" + app.name);
+                focusDownload(existing);
                 return;
             }
             File dir = getExternalFilesDir("downloads");
@@ -298,7 +320,7 @@ public final class MainActivity extends Activity {
                 showMessage("无法创建下载目录。");
                 return;
             }
-            String fileName = safeFileName(app.name) + ".apk";
+            String fileName = safeFileName(app.name + "_" + app.version) + ".apk";
             File file = new File(dir, fileName);
             if (file.exists() && !file.delete()) {
                 showMessage("旧安装包无法替换，请稍后重试。");
@@ -307,11 +329,104 @@ public final class MainActivity extends Activity {
             progressBar.setVisibility(View.VISIBLE);
             progressBar.setIndeterminate(false);
             progressBar.setProgress(0);
-            currentDownloadTask = new DownloadTask(app, file);
-            currentDownloadTask.execute();
+            DownloadItem item = new DownloadItem(key, app, file);
+            downloads.put(key, item);
+            renderDownloads();
+            item.task = new DownloadTask(key, item);
+            item.task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            showMessage("已加入下载：" + app.name);
         } catch (Exception e) {
             showMessage("下载启动失败：" + cleanError(e));
         }
+    }
+
+    private void renderDownloads() {
+        if (downloadContainer == null) {
+            return;
+        }
+        downloadContainer.removeAllViews();
+        if (downloads.isEmpty()) {
+            TextView empty = detailText(15, false, MUTED);
+            empty.setText("暂无下载任务");
+            empty.setGravity(Gravity.CENTER_VERTICAL);
+            downloadContainer.addView(empty, new LinearLayout.LayoutParams(-1, dp(42)));
+            return;
+        }
+        for (DownloadItem item : downloads.values()) {
+            downloadContainer.addView(createDownloadRow(item), new LinearLayout.LayoutParams(-1, dp(72)));
+        }
+    }
+
+    private View createDownloadRow(DownloadItem item) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(4), 0, dp(4));
+
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        TextView name = detailText(15, true, TEXT);
+        name.setSingleLine(true);
+        name.setText(item.app.name);
+        TextView state = detailText(13, false, MUTED);
+        state.setSingleLine(true);
+        state.setText(item.statusText());
+        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(100);
+        bar.setProgress(item.progress);
+        bar.setIndeterminate(item.running && item.progress == 0);
+        info.addView(name, new LinearLayout.LayoutParams(-1, dp(22)));
+        info.addView(state, new LinearLayout.LayoutParams(-1, dp(20)));
+        info.addView(bar, new LinearLayout.LayoutParams(-1, dp(18)));
+        row.addView(info, new LinearLayout.LayoutParams(0, -1, 1f));
+
+        Button action = actionButton(item.running ? "取消" : item.finished ? "安装" : "移除");
+        action.setTextSize(15);
+        action.setOnClickListener(v -> {
+            if (item.running) {
+                cancelDownload(item);
+            } else if (item.finished) {
+                installApk(item.file);
+            } else {
+                removeDownload(item);
+            }
+        });
+        action.setOnFocusChangeListener((v, hasFocus) -> v.setBackgroundColor(hasFocus ? (item.running ? DANGER : FOCUS) : BUTTON_BG));
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(dp(82), dp(48));
+        actionParams.leftMargin = dp(10);
+        row.addView(action, actionParams);
+        return row;
+    }
+
+    private void focusDownload(DownloadItem item) {
+        int index = new ArrayList<>(downloads.values()).indexOf(item);
+        if (index >= 0 && downloadContainer != null) {
+            View row = downloadContainer.getChildAt(index);
+            if (row instanceof ViewGroup) {
+                View button = ((ViewGroup) row).getChildAt(1);
+                button.requestFocus();
+            }
+        }
+    }
+
+    private void cancelDownload(DownloadItem item) {
+        if (item.task != null) {
+            item.task.cancel(true);
+        }
+        item.running = false;
+        item.cancelled = true;
+        item.progress = 0;
+        if (item.file.exists()) {
+            item.file.delete();
+        }
+        renderDownloads();
+        showMessage("已取消下载：" + item.app.name);
+    }
+
+    private void removeDownload(DownloadItem item) {
+        downloads.remove(item.key);
+        renderDownloads();
+        showMessage("已移除任务：" + item.app.name);
     }
 
     private void installApk(File file) {
@@ -371,21 +486,56 @@ public final class MainActivity extends Activity {
         return message == null || message.length() == 0 ? e.getClass().getSimpleName() : message;
     }
 
-    private final class DownloadTask extends AsyncTask<Void, Integer, File> {
-        private static final int BUFFER_SIZE = 32 * 1024;
+    private static String downloadKey(TvApp app) {
+        return app.downloadUrl.length() == 0 ? app.name + "|" + app.version : app.downloadUrl;
+    }
 
-        private final TvApp app;
-        private final File file;
-        private Exception error;
+    private final class DownloadItem {
+        final String key;
+        final TvApp app;
+        final File file;
+        DownloadTask task;
+        int progress;
+        int lastRenderedProgress = -1;
+        boolean running = true;
+        boolean finished;
+        boolean cancelled;
+        Exception error;
 
-        DownloadTask(TvApp app, File file) {
+        DownloadItem(String key, TvApp app, File file) {
+            this.key = key;
             this.app = app;
             this.file = file;
         }
 
+        String statusText() {
+            if (finished) {
+                return "已完成，按安装可再次打开";
+            }
+            if (cancelled) {
+                return "已取消";
+            }
+            if (error != null) {
+                return "失败：" + cleanError(error);
+            }
+            return progress > 0 ? "下载中 " + progress + "%" : "正在连接...";
+        }
+    }
+
+    private final class DownloadTask extends AsyncTask<Void, Integer, File> {
+        private static final int BUFFER_SIZE = 32 * 1024;
+
+        private final String key;
+        private final DownloadItem item;
+
+        DownloadTask(String key, DownloadItem item) {
+            this.key = key;
+            this.item = item;
+        }
+
         @Override
         protected void onPreExecute() {
-            showMessage("正在应用内下载：" + app.name);
+            showMessage("正在应用内下载：" + item.app.name);
             progressBar.setIndeterminate(true);
         }
 
@@ -393,7 +543,7 @@ public final class MainActivity extends Activity {
         protected File doInBackground(Void... params) {
             HttpURLConnection connection = null;
             try {
-                URL url = new URL(app.downloadUrl);
+                URL url = new URL(item.app.downloadUrl);
                 connection = (HttpURLConnection) url.openConnection();
                 connection.setConnectTimeout(15000);
                 connection.setReadTimeout(30000);
@@ -409,7 +559,7 @@ public final class MainActivity extends Activity {
                 byte[] buffer = new byte[BUFFER_SIZE];
                 long downloaded = 0L;
                 try (InputStream input = new BufferedInputStream(connection.getInputStream());
-                     OutputStream output = new FileOutputStream(file)) {
+                     OutputStream output = new FileOutputStream(item.file)) {
                     int read;
                     while (!isCancelled() && (read = input.read(buffer)) != -1) {
                         output.write(buffer, 0, read);
@@ -424,14 +574,14 @@ public final class MainActivity extends Activity {
                 if (isCancelled()) {
                     throw new IllegalStateException("下载已取消");
                 }
-                if (file.length() == 0) {
+                if (item.file.length() == 0) {
                     throw new IllegalStateException("文件为空");
                 }
-                return file;
+                return item.file;
             } catch (Exception e) {
-                error = e;
-                if (file.exists()) {
-                    file.delete();
+                item.error = e;
+                if (item.file.exists()) {
+                    item.file.delete();
                 }
                 return null;
             } finally {
@@ -447,30 +597,46 @@ public final class MainActivity extends Activity {
                 return;
             }
             int progress = values[0];
+            item.progress = progress;
             progressBar.setIndeterminate(false);
             progressBar.setProgress(progress);
-            showMessage("正在下载：" + app.name + "  " + progress + "%");
+            if (item.lastRenderedProgress < 0 || progress - item.lastRenderedProgress >= 5 || progress >= 99) {
+                item.lastRenderedProgress = progress;
+                renderDownloads();
+            }
+            showMessage("正在下载：" + item.app.name + "  " + progress + "%");
         }
 
         @Override
         protected void onPostExecute(File result) {
-            currentDownloadTask = null;
+            item.running = false;
+            item.task = null;
             if (result == null) {
                 progressBar.setVisibility(View.GONE);
-                showMessage("下载失败：" + cleanError(error));
+                renderDownloads();
+                showMessage("下载失败：" + item.app.name + "，" + cleanError(item.error));
                 return;
             }
+            item.finished = true;
+            item.progress = 100;
             progressBar.setProgress(100);
-            showMessage("下载完成，正在打开安装器：" + app.name);
+            renderDownloads();
+            showMessage("下载完成，正在打开安装器：" + item.app.name);
             installApk(result);
         }
 
         @Override
         protected void onCancelled() {
-            currentDownloadTask = null;
-            if (file.exists()) {
-                file.delete();
+            DownloadItem latest = downloads.get(key);
+            if (latest == item) {
+                item.running = false;
+                item.cancelled = true;
+                item.task = null;
             }
+            if (item.file.exists()) {
+                item.file.delete();
+            }
+            renderDownloads();
         }
     }
 
