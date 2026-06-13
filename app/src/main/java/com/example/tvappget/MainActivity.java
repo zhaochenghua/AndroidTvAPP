@@ -1,12 +1,7 @@
 package com.example.tvappget;
 
 import android.app.Activity;
-import android.app.DownloadManager;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -25,11 +20,15 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public final class MainActivity extends Activity {
     private static final int BG = Color.rgb(11, 15, 20);
@@ -40,8 +39,6 @@ public final class MainActivity extends Activity {
 
     private final GitHubSource source = new GitHubSource();
     private final ArrayList<TvApp> apps = new ArrayList<>();
-    private final Map<Long, File> downloadFiles = new HashMap<>();
-    private final Map<Long, TvApp> downloadApps = new HashMap<>();
 
     private LinearLayout listContainer;
     private TextView titleView;
@@ -53,34 +50,20 @@ public final class MainActivity extends Activity {
     private Button refreshButton;
     private ProgressBar progressBar;
     private TvApp selected;
-
-    private final BroadcastReceiver receiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
-            if (!downloadFiles.containsKey(id)) {
-                return;
-            }
-            handleDownloadFinished(id);
-        }
-    };
+    private DownloadTask currentDownloadTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
-        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(receiver, filter);
-        }
         loadApps();
     }
 
     @Override
     protected void onDestroy() {
-        unregisterReceiver(receiver);
+        if (currentDownloadTask != null) {
+            currentDownloadTask.cancel(true);
+        }
         super.onDestroy();
     }
 
@@ -302,6 +285,10 @@ public final class MainActivity extends Activity {
 
     private void downloadApk(TvApp app) {
         try {
+            if (currentDownloadTask != null) {
+                showMessage("已有下载任务正在进行，请稍候。");
+                return;
+            }
             File dir = getExternalFilesDir("downloads");
             if (dir == null) {
                 showMessage("无法访问下载目录。");
@@ -317,48 +304,13 @@ public final class MainActivity extends Activity {
                 showMessage("旧安装包无法替换，请稍后重试。");
                 return;
             }
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(app.downloadUrl));
-            request.setTitle(app.name);
-            request.setDescription("正在下载 " + app.version);
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setMimeType("application/vnd.android.package-archive");
-            request.setDestinationUri(Uri.fromFile(file));
-            DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            long id = manager.enqueue(request);
-            downloadFiles.put(id, file);
-            downloadApps.put(id, app);
             progressBar.setVisibility(View.VISIBLE);
-            progressBar.setProgress(5);
-            showMessage("已开始下载：" + app.name);
+            progressBar.setIndeterminate(false);
+            progressBar.setProgress(0);
+            currentDownloadTask = new DownloadTask(app, file);
+            currentDownloadTask.execute();
         } catch (Exception e) {
             showMessage("下载启动失败：" + cleanError(e));
-        }
-    }
-
-    private void handleDownloadFinished(long id) {
-        DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-        Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(id));
-        try {
-            if (cursor == null || !cursor.moveToFirst()) {
-                showMessage("下载状态未知。");
-                return;
-            }
-            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-            if (status != DownloadManager.STATUS_SUCCESSFUL) {
-                showMessage("下载失败，请稍后重试。");
-                return;
-            }
-            progressBar.setProgress(100);
-            File file = downloadFiles.get(id);
-            TvApp app = downloadApps.get(id);
-            showMessage("下载完成，正在打开安装器：" + (app == null ? "" : app.name));
-            installApk(file);
-        } finally {
-            if (cursor != null) {
-                cursor.close();
-            }
-            downloadFiles.remove(id);
-            downloadApps.remove(id);
         }
     }
 
@@ -417,6 +369,109 @@ public final class MainActivity extends Activity {
     private static String cleanError(Exception e) {
         String message = e.getMessage();
         return message == null || message.length() == 0 ? e.getClass().getSimpleName() : message;
+    }
+
+    private final class DownloadTask extends AsyncTask<Void, Integer, File> {
+        private static final int BUFFER_SIZE = 32 * 1024;
+
+        private final TvApp app;
+        private final File file;
+        private Exception error;
+
+        DownloadTask(TvApp app, File file) {
+            this.app = app;
+            this.file = file;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            showMessage("正在应用内下载：" + app.name);
+            progressBar.setIndeterminate(true);
+        }
+
+        @Override
+        protected File doInBackground(Void... params) {
+            HttpURLConnection connection = null;
+            try {
+                URL url = new URL(app.downloadUrl);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
+                connection.setInstanceFollowRedirects(true);
+                connection.setRequestProperty("User-Agent", "TVAppGet/1.0");
+
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    throw new IllegalStateException("HTTP " + code);
+                }
+
+                int total = connection.getContentLength();
+                byte[] buffer = new byte[BUFFER_SIZE];
+                long downloaded = 0L;
+                try (InputStream input = new BufferedInputStream(connection.getInputStream());
+                     OutputStream output = new FileOutputStream(file)) {
+                    int read;
+                    while (!isCancelled() && (read = input.read(buffer)) != -1) {
+                        output.write(buffer, 0, read);
+                        downloaded += read;
+                        if (total > 0) {
+                            publishProgress((int) Math.min(99, downloaded * 100 / total));
+                        }
+                    }
+                    output.flush();
+                }
+
+                if (isCancelled()) {
+                    throw new IllegalStateException("下载已取消");
+                }
+                if (file.length() == 0) {
+                    throw new IllegalStateException("文件为空");
+                }
+                return file;
+            } catch (Exception e) {
+                error = e;
+                if (file.exists()) {
+                    file.delete();
+                }
+                return null;
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }
+
+        @Override
+        protected void onProgressUpdate(Integer... values) {
+            if (values.length == 0) {
+                return;
+            }
+            int progress = values[0];
+            progressBar.setIndeterminate(false);
+            progressBar.setProgress(progress);
+            showMessage("正在下载：" + app.name + "  " + progress + "%");
+        }
+
+        @Override
+        protected void onPostExecute(File result) {
+            currentDownloadTask = null;
+            if (result == null) {
+                progressBar.setVisibility(View.GONE);
+                showMessage("下载失败：" + cleanError(error));
+                return;
+            }
+            progressBar.setProgress(100);
+            showMessage("下载完成，正在打开安装器：" + app.name);
+            installApk(result);
+        }
+
+        @Override
+        protected void onCancelled() {
+            currentDownloadTask = null;
+            if (file.exists()) {
+                file.delete();
+            }
+        }
     }
 
     private int dp(int value) {
