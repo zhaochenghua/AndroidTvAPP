@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
 
 final class GitHubSource {
     static final String README_URL = "https://raw.githubusercontent.com/youhunwl/TVAPP/main/README.md";
-    private static final String REPO = "https://github.com/youhunwl/TVAPP";
+    public static final String REPO = "https://github.com/youhunwl/TVAPP";
     private static final String TREE_API = "https://api.github.com/repos/youhunwl/TVAPP/git/trees/main?recursive=1";
     private static final Pattern LINK = Pattern.compile("\\[下载\\]\\(([^)]+)\\)");
 

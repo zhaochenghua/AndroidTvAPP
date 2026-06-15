@@ -2,6 +2,7 @@ package com.example.tvappget;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -15,11 +16,19 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.WriterException;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
 
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -29,6 +38,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +67,7 @@ public final class MainActivity extends Activity {
     private Button primaryButton;
     private Button refreshButton;
     private ProgressBar progressBar;
+    private ImageView qrCodeView;
     private TvApp selected;
     private String currentCategory = "全部";
 
@@ -64,6 +75,7 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
+        generateQrCode();
         loadApps();
     }
 
@@ -132,6 +144,25 @@ public final class MainActivity extends Activity {
         detail.addView(versionView, new LinearLayout.LayoutParams(-1, dp(26)));
         statusView = detailText(15, true, TEXT);
         detail.addView(statusView, new LinearLayout.LayoutParams(-1, dp(28)));
+
+        LinearLayout qrSection = new LinearLayout(this);
+        qrSection.setOrientation(LinearLayout.HORIZONTAL);
+        qrSection.setGravity(Gravity.CENTER_VERTICAL);
+        qrSection.setPadding(0, dp(4), 0, dp(4));
+        qrSection.setBackgroundColor(PANEL);
+
+        TextView qrLabel = detailText(12, false, MUTED);
+        qrLabel.setText("手机扫码访问源网页\n" + GitHubSource.REPO);
+        qrLabel.setLineSpacing(dp(2), 1.0f);
+        qrSection.addView(qrLabel, new LinearLayout.LayoutParams(0, dp(160), 0.45f));
+
+        qrCodeView = new ImageView(this);
+        qrCodeView.setAdjustViewBounds(true);
+        qrCodeView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        qrSection.addView(qrCodeView, new LinearLayout.LayoutParams(0, dp(150), 0.55f));
+
+        detail.addView(qrSection, new LinearLayout.LayoutParams(-1, dp(168)));
+
         noteView = detailText(15, false, TEXT);
         noteView.setLineSpacing(dp(2), 1.0f);
         detail.addView(noteView, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -703,6 +734,28 @@ public final class MainActivity extends Activity {
                 item.file.delete();
             }
             renderDownloads();
+        }
+    }
+
+    private void generateQrCode() {
+        int size = 400;
+        try {
+            Map<EncodeHintType, Object> hints = new HashMap<>();
+            hints.put(EncodeHintType.CHARACTER_SET, "UTF-8");
+            hints.put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M);
+            hints.put(EncodeHintType.MARGIN, 1);
+
+            QRCodeWriter writer = new QRCodeWriter();
+            BitMatrix matrix = writer.encode(GitHubSource.REPO, BarcodeFormat.QR_CODE, size, size, hints);
+
+            Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            for (int x = 0; x < size; x++) {
+                for (int y = 0; y < size; y++) {
+                    bitmap.setPixel(x, y, matrix.get(x, y) ? Color.BLACK : Color.WHITE);
+                }
+            }
+            qrCodeView.setImageBitmap(bitmap);
+        } catch (WriterException ignored) {
         }
     }
 
