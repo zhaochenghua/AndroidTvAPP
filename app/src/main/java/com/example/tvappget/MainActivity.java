@@ -64,7 +64,6 @@ public final class MainActivity extends Activity {
     private TextView statusView;
     private TextView noteView;
     private TextView messageView;
-    private Button primaryButton;
     private Button refreshButton;
     private ProgressBar progressBar;
     private ImageView qrCodeView;
@@ -95,12 +94,24 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(28), dp(22), dp(28), dp(22));
         root.setBackgroundColor(BG);
 
+        LinearLayout headerBar = new LinearLayout(this);
+        headerBar.setOrientation(LinearLayout.HORIZONTAL);
+        headerBar.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView header = new TextView(this);
         header.setText("TV应用获取");
         header.setTextColor(TEXT);
         header.setTextSize(26);
         header.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(header, new LinearLayout.LayoutParams(-1, dp(40)));
+        headerBar.addView(header, new LinearLayout.LayoutParams(0, dp(40), 1f));
+
+        refreshButton = actionButton("刷新列表");
+        refreshButton.setTextSize(14);
+        refreshButton.setOnClickListener(v -> loadApps());
+        LinearLayout.LayoutParams refreshBtnParams = new LinearLayout.LayoutParams(dp(120), dp(36));
+        headerBar.addView(refreshButton, refreshBtnParams);
+
+        root.addView(headerBar, new LinearLayout.LayoutParams(-1, dp(40)));
 
         messageView = new TextView(this);
         messageView.setTextColor(MUTED);
@@ -154,36 +165,26 @@ public final class MainActivity extends Activity {
         TextView qrLabel = detailText(12, false, MUTED);
         qrLabel.setText("手机扫码访问源网页\n" + GitHubSource.REPO);
         qrLabel.setLineSpacing(dp(2), 1.0f);
-        qrSection.addView(qrLabel, new LinearLayout.LayoutParams(0, dp(160), 0.45f));
+        qrSection.addView(qrLabel, new LinearLayout.LayoutParams(0, dp(130), 0.45f));
 
         qrCodeView = new ImageView(this);
         qrCodeView.setAdjustViewBounds(true);
         qrCodeView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        qrSection.addView(qrCodeView, new LinearLayout.LayoutParams(0, dp(150), 0.55f));
+        qrSection.addView(qrCodeView, new LinearLayout.LayoutParams(0, dp(120), 0.55f));
 
-        detail.addView(qrSection, new LinearLayout.LayoutParams(-1, dp(168)));
+        detail.addView(qrSection, new LinearLayout.LayoutParams(-1, dp(140)));
 
         noteView = detailText(15, false, TEXT);
         noteView.setLineSpacing(dp(2), 1.0f);
         detail.addView(noteView, new LinearLayout.LayoutParams(-1, 0, 1f));
-
-        primaryButton = actionButton("下载并安装");
-        primaryButton.setOnClickListener(v -> runPrimaryAction());
-        detail.addView(primaryButton, new LinearLayout.LayoutParams(-1, dp(46)));
-
-        refreshButton = actionButton("刷新列表");
-        refreshButton.setOnClickListener(v -> loadApps());
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(44));
-        refreshParams.topMargin = dp(8);
-        detail.addView(refreshButton, refreshParams);
 
         ScrollView downloadScroll = new ScrollView(this);
         downloadScroll.setFillViewport(false);
         downloadContainer = new LinearLayout(this);
         downloadContainer.setOrientation(LinearLayout.VERTICAL);
         downloadScroll.addView(downloadContainer, new ScrollView.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(108));
-        downloadParams.topMargin = dp(8);
+        LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(88));
+        downloadParams.topMargin = dp(6);
         detail.addView(downloadScroll, downloadParams);
         renderDownloads();
 
@@ -354,7 +355,6 @@ public final class MainActivity extends Activity {
         versionView.setText("分类：" + empty(selected.category, "未分类") + "  版本：" + empty(selected.version, "未知"));
         statusView.setText("状态：" + empty(selected.status, "未知"));
         noteView.setText(empty(selected.note, "暂无简介"));
-        primaryButton.setText(selected.apk ? "下载并安装" : "查看可下载版本");
     }
 
     private void runPrimaryAction() {
